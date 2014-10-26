@@ -82,7 +82,7 @@ func Gremlin(add string, q string) []byte {
 
 }
 
-func NewAccount(add string, email string, password string) {
+func NewAccount(add string, email string, password string) error {
 	query := "g.V(\"" + email + "\").Out(\"HasPasswordHash\").All()"
 	a := Gremlin(add, query)
 	fmt.Printf("New Account Reply %s", []byte(a))
@@ -100,12 +100,15 @@ func NewAccount(add string, email string, password string) {
 		}
 		r := [...]quad{q}
 		Write(add, r[:])
+		return nil
 	}
 	//n := m["result"]
+	return errors.New("An account with this email exists already")
 
 }
 
 func Auth(add string, email string, password string) error {
+	fmt.Println("Password: ", password)
 	query := "g.V(\"" + email + "\").Out(\"HasPasswordHash\").All()"
 	a := Gremlin(add, query)
 	u := []byte(a)
@@ -115,15 +118,18 @@ func Auth(add string, email string, password string) error {
 	if m["result"] != nil {
 		n := m["result"].([]interface{})
 		o := n[0].(map[string]interface{})
-		storedPass := o["id"].(string)
-		fmt.Println(o["id"])
+		p := o["id"].(string)
+		storedPass := base64.URLEncoding.EncodeToString([]byte(p))
+		fmt.Println(storedPass)
 		pHash := sha1.New()
 		io.WriteString(pHash, password)
 		pass := base64.URLEncoding.EncodeToString(pHash.Sum(nil))
+		fmt.Println(pass)
 		if storedPass == pass {
 			fmt.Println(storedPass + " vs " + pass)
 			return nil
 		} else {
+			fmt.Println(storedPass + " vs " + pass)
 			return errors.New("Incorrect Password")
 		}
 	}
@@ -208,10 +214,32 @@ func RootHandler(w http.ResponseWriter, r *http.Request) {
 	t, _ := template.ParseFiles("tmpl/signup.html")
 	t.Execute(w, nil)
 }
+
+func SignupHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	fmt.Println("Name: ", r.Form["sname"])
+	fmt.Println("Email: ", r.Form["semail"])
+	fmt.Println("Password: ", r.Form["spassword"])
+
+	err := NewAccount(HAddress, strings.Join(r.Form["semail"], ""), strings.Join(r.Form["spassword"], ""))
+	if err != nil {
+		fmt.Println(err)
+	}
+	q := quad{
+		Subject:   strings.Join(r.Form["semail"], ""),
+		Predicate: "http://schema.org/name",
+		Object:    strings.Join(r.Form["sname"], ""),
+	}
+	k := [...]quad{q}
+	Write(HAddress, k[:])
+
+}
+
 func server() {
 	r := mux.NewRouter()
 	r.HandleFunc("/", RootHandler).Methods("GET")
 	r.HandleFunc("/signin", LoginHandler).Methods("POST")
+	r.HandleFunc("/signup", SignupHandler).Methods("POST")
 	http.Handle("/", r)
 	err := http.ListenAndServe(":9090", nil)
 	if err != nil {
